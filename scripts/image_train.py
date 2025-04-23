@@ -15,10 +15,8 @@ from improved_diffusion.script_util import (
 )
 from improved_diffusion.train_util import TrainLoop
 
-
 def main():
     args = create_argparser().parse_args()
-
     dist_util.setup_dist()
     logger.configure()
 
@@ -27,7 +25,9 @@ def main():
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
     model.to(dist_util.dev())
-    schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
+    schedule_sampler = create_named_schedule_sampler(
+        args.schedule_sampler, diffusion
+    )
 
     logger.log("creating data loader...")
     data = load_data(
@@ -35,6 +35,7 @@ def main():
         batch_size=args.batch_size,
         image_size=args.image_size,
         class_cond=args.class_cond,
+        class_list=args.class_list,  # Added for multi-label
     )
 
     logger.log("training...")
@@ -56,7 +57,6 @@ def main():
         lr_anneal_steps=args.lr_anneal_steps,
     ).run_loop()
 
-
 def create_argparser():
     defaults = dict(
         data_dir="",
@@ -74,10 +74,16 @@ def create_argparser():
         fp16_scale_growth=1e-3,
     )
     defaults.update(model_and_diffusion_defaults())
+
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
+    parser.add_argument(
+        "--class_list",
+        type=lambda s: s.split(","),
+        default=None,
+        help="Comma-separated list of all class names for multi-label conditioning",
+    )
     return parser
-
 
 if __name__ == "__main__":
     main()
