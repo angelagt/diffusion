@@ -1,106 +1,126 @@
-from PIL import Image
-import blobfile as bf
-from mpi4py import MPI
+import os
 import numpy as np
-from torch.utils.data import DataLoader, Dataset
-
-
-def load_data(
-    *, data_dir, batch_size, image_size, class_cond=False, deterministic=False
-):
-    """
-    For a dataset, create a generator over (images, kwargs) pairs.
-
-    Each images is an NCHW float tensor, and the kwargs dict contains zero or
-    more keys, each of which map to a batched Tensor of their own.
-    The kwargs dict can be used for class labels, in which case the key is "y"
-    and the values are integer tensors of class labels.
-
-    :param data_dir: a dataset directory.
-    :param batch_size: the batch size of each returned pair.
-    :param image_size: the size to which images are resized.
-    :param class_cond: if True, include a "y" key in returned dicts for class
-                       label. If classes are not available and this is true, an
-                       exception will be raised.
-    :param deterministic: if True, yield results in a deterministic order.
-    """
-    if not data_dir:
-        raise ValueError("unspecified data directory")
-    all_files = _list_image_files_recursively(data_dir)
-    classes = None
-    if class_cond:
-        # Assume classes are the first part of the filename,
-        # before an underscore.
-        class_names = [bf.basename(path).split("_")[0] for path in all_files]
-        sorted_classes = {x: i for i, x in enumerate(sorted(set(class_names)))}
-        classes = [sorted_classes[x] for x in class_names]
-    dataset = ImageDataset(
-        image_size,
-        all_files,
-        classes=classes,
-        shard=MPI.COMM_WORLD.Get_rank(),
-        num_shards=MPI.COMM_WORLD.Get_size(),
-    )
-    if deterministic:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True
-        )
-    else:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=1, drop_last=True
-        )
-    while True:
-        yield from loader
-
-
-def _list_image_files_recursively(data_dir):
-    results = []
-    for entry in sorted(bf.listdir(data_dir)):
-        full_path = bf.join(data_dir, entry)
-        ext = entry.split(".")[-1]
-        if "." in entry and ext.lower() in ["jpg", "jpeg", "png", "gif"]:
-            results.append(full_path)
-        elif bf.isdir(full_path):
-            results.extend(_list_image_files_recursively(full_path))
-    return results
-
+from PIL import Image
+from torch.utils.data import Dataset
 
 class ImageDataset(Dataset):
-    def __init__(self, resolution, image_paths, classes=None, shard=0, num_shards=1):
+    """
+    Dataset for images with optional multi-label conditioning.
+
+    If class_cond=True, expects filenames to encode labels as
+    'label1_label2_..._id.ext' (with optional numeric suffix). Splits
+    by '_' and matches tokens against provided class_list.
+    """
+    def __init__(
+        self,
+        folder: str,
+        image_size: int,
+        class_cond: bool = False,
+        class_list: list[str] | None = None,
+        transforms=None,
+    ):
         super().__init__()
-        self.resolution = resolution
-        self.local_images = image_paths[shard:][::num_shards]
-        self.local_classes = None if classes is None else classes[shard:][::num_shards]
+        self.folder = folder
+        self.image_size = image_size
+        self.transforms = transforms
+        self.class_cond = class_cond
+
+        if class_cond:
+            assert class_list is not None, "Need class_list for multi-label"
+            # Mapping from class name to index
+            self.class_to_idx = {c: i for i, c in enumerate(class_list)}
+            self.num_classes = len(class_list)
+            # Scan folder for image paths and their label-lists
+            self.filenames, self.class_label_lists = self._scan_folder(folder)
+        else:
+            # Just scan all images without labels
+            self.filenames = self._scan_folder(folder)
+
+    def _scan_folder(self, folder: str):
+        """
+        Walks `folder` for image files.
+        If class_cond, returns (filenames, class_label_lists).
+        Otherwise, returns just filenames list.
+        """
+        exts = {'.jpg', '.jpeg', '.png', '.bmp'}
+        filenames = []
+        labels_list = []
+
+        for root, dirs, files in os.walk(folder):
+            for fname in files:
+                name, ext = os.path.splitext(fname)
+                if ext.lower() not in exts:
+                    continue
+
+                path = os.path.join(root, fname)
+                filenames.append(path)
+
+                if self.class_cond:
+                    parts = name.split('_')
+                    # Drop trailing numeric ID if present
+                    if parts and parts[-1].isdigit():
+                        parts = parts[:-1]
+                    # Keep only known classes
+                    label_names = [p for p in parts if p in self.class_to_idx]
+                    labels_list.append(label_names)
+
+        if self.class_cond:
+            return filenames, labels_list
+        return filenames
 
     def __len__(self):
-        return len(self.local_images)
+        return len(self.filenames)
 
-    def __getitem__(self, idx):
-        path = self.local_images[idx]
-        with bf.BlobFile(path, "rb") as f:
-            pil_image = Image.open(f)
-            pil_image.load()
+    def __getitem__(self, idx: int):
+        # Load and preprocess image
+        path = self.filenames[idx]
+        img = Image.open(path).convert('RGB')
+        if self.transforms:
+            img = self.transforms(img)
+        else:
+            img = np.array(img.resize((self.image_size, self.image_size)))
 
-        # We are not on a new enough PIL to support the `reducing_gap`
-        # argument, which uses BOX downsampling at powers of two first.
-        # Thus, we do it by hand to improve downsample quality.
-        while min(*pil_image.size) >= 2 * self.resolution:
-            pil_image = pil_image.resize(
-                tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-            )
+        out = {"image": np.array(img)}
+        if self.class_cond:
+            labels = self.class_label_lists[idx]
+            multi_hot = np.zeros(self.num_classes, dtype=np.float32)
+            for lab in labels:
+                multi_hot[self.class_to_idx[lab]] = 1.0
+            out["y"] = multi_hot
 
-        scale = self.resolution / min(*pil_image.size)
-        pil_image = pil_image.resize(
-            tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-        )
+        return out
 
-        arr = np.array(pil_image.convert("RGB"))
-        crop_y = (arr.shape[0] - self.resolution) // 2
-        crop_x = (arr.shape[1] - self.resolution) // 2
-        arr = arr[crop_y : crop_y + self.resolution, crop_x : crop_x + self.resolution]
-        arr = arr.astype(np.float32) / 127.5 - 1
+# Example load_data modification
 
-        out_dict = {}
-        if self.local_classes is not None:
-            out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
-        return np.transpose(arr, [2, 0, 1]), out_dict
+def load_data(
+    *,
+    data_dir: str,
+    batch_size: int,
+    image_size: int,
+    class_cond: bool = False,
+    class_list: list[str] | None = None,
+    deterministic: bool = False
+):
+    """
+    Returns a DataLoader for ImageDataset with optional multi-label conditioning.
+    """
+    from torch.utils.data import DataLoader
+    # Define any torchvision or custom transforms here
+    transforms = None  # e.g., your resize/normalize pipeline
+
+    dataset = ImageDataset(
+        folder=data_dir,
+        image_size=image_size,
+        class_cond=class_cond,
+        class_list=class_list,
+        transforms=transforms,
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=not deterministic,
+        drop_last=True,
+        num_workers=4,
+    )
+    return loader
