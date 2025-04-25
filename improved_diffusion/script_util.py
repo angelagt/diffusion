@@ -23,6 +23,7 @@ def model_and_diffusion_defaults():
         learn_sigma=False,
         sigma_small=False,
         class_cond=False,
+        num_classes=None,
         diffusion_steps=1000,
         noise_schedule="linear",
         timestep_respacing="",
