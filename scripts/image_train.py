@@ -25,6 +25,7 @@ def main():
         args.num_classes = len(args.class_list)
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
+    )
     model.to(dist_util.dev())
     schedule_sampler = create_named_schedule_sampler(
         args.schedule_sampler, diffusion
