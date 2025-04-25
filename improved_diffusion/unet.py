@@ -341,7 +341,10 @@ class UNetModel(nn.Module):
         )
 
         if self.num_classes is not None:
-            self.label_emb = nn.Linear(num_classes, time_embed_dim)
+            # single-label lookup for y ∈ {0,…,num_classes-1}
+            self.label_emb = nn.Embedding(num_classes, time_embed_dim)
+            # linear projection for y ∈ {0,1}^num_classes
+            self.label_proj = nn.Linear(num_classes, time_embed_dim)
 
         self.input_blocks = nn.ModuleList(
             [
@@ -476,12 +479,12 @@ class UNetModel(nn.Module):
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is None:
-            # Expect scalar class IDs
-            assert y.ndim == 1 and y.shape[0] == x.shape[0]
+            # single-label: y should be shape (B,)
+            assert y.ndim == 1 and y.shape[0] == x.shape[0], f"Expected y shape (B,), got {tuple(y.shape)}"
             y_emb = self.label_emb(y)
         else:
-            # multi-hot branch
-            assert y.shape == (x.shape[0], self.num_classes)
+            # multi-label: y should be shape (B, num_classes)
+            assert y.ndim == 2 and y.shape == (x.shape[0], self.num_classes), f"Expected y shape (B,{self.num_classes}), got {tuple(y.shape)}"
             y_emb = self.label_proj(y)
 
         h = x.type(self.inner_dtype)
