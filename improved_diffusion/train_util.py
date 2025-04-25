@@ -226,6 +226,17 @@ class TrainLoop:
                 loss.backward()
 
     def optimize_fp16(self):
+        # detect NaNs/infs, skipping parameters with no grad
+        bad_grad = False
+        for p in self.model_params:
+            if p.grad is None:
+                continue
+            if not th.isfinite(p.grad).all():
+                bad_grad = True
+                break
+        if bad_grad:
+            self.skipped_steps += 1
+            return
         if any(not th.isfinite(p.grad).all() for p in self.model_params):
             self.lg_loss_scale -= 1
             logger.log(f"Found NaN, decreased lg_loss_scale to {self.lg_loss_scale}")
