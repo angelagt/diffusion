@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
