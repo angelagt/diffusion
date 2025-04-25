@@ -30,13 +30,14 @@ def main():
     )
 
     logger.log("creating data loader...")
-    data = load_data(
+    loader = load_data(
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         image_size=args.image_size,
         class_cond=args.class_cond,
         class_list=args.class_list,  # Added for multi-label
     )
+    data = iter(loader)
 
     logger.log("training...")
     TrainLoop(
