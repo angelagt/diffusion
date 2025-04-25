@@ -79,8 +79,17 @@ class ImageDataset(Dataset):
             img = self.transforms(img)
         else:
             img = np.array(img.resize((self.image_size, self.image_size)))
+        out = {"image": np.array(img)}            
+        
+        img = Image.open(path).convert('RGB')
+        img = img.resize((self.image_size, self.image_size))
 
-        out = {"image": np.array(img)}
+        arr = np.array(img, dtype=np.float32)           # shape (H,W,3), values 0–255
+        tensor = torch.from_numpy(arr)                  # uint8→float32
+        tensor = tensor.permute(2, 0, 1)                # → (3,H,W)
+        tensor = tensor.mul_(1/127.5).sub_(1.0)         # scale 0–255 → –1–1
+        out = {"image": tensor}
+
         if self.class_cond:
             labels = self.class_label_lists[idx]
             multi_hot = np.zeros(self.num_classes, dtype=np.float32)
