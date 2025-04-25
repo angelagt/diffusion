@@ -37,7 +37,17 @@ def main():
         class_cond=args.class_cond,
         class_list=args.class_list,  # Added for multi-label
     )
-    data = iter(loader)
+    
+    def data_iterator():
+        for batch in loader:
+            # batch is a dict, e.g. {"image": tensor, "y": tensor}
+            images = batch["image"]
+            cond = {}
+            if "y" in batch:
+                cond["y"] = batch["y"]
+            yield images, cond
+
+    data = iter(data_iterator())
 
     logger.log("training...")
     TrainLoop(
