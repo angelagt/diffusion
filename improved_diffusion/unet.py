@@ -475,9 +475,14 @@ class UNetModel(nn.Module):
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
-        if self.num_classes is not None:
-            assert y.shape == (x.shape[0],)
-            emb = emb + self.label_emb(y)
+        if self.num_classes is None:
+            # Expect scalar class IDs
+            assert y.ndim == 1 and y.shape[0] == x.shape[0]
+            y_emb = self.label_emb(y)
+        else:
+            # multi-hot branch
+            assert y.shape == (x.shape[0], self.num_classes)
+            y_emb = self.label_proj(y)
 
         h = x.type(self.inner_dtype)
         for module in self.input_blocks:
