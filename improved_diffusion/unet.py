@@ -287,4 +287,3 @@ class SuperResModel(UNetModel):
         new_h, new_w = x.shape[2:]
         up = F.interpolate(low_res, (new_h, new_w), mode='bilinear')
         return super().get_feature_vectors(th.cat([x, up], dim=1), timesteps, **kwargs)
-```
