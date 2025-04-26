@@ -41,15 +41,15 @@ def main():
     )
     
     def data_iterator():
-        for batch in loader:
-            # batch is a dict, e.g. {"image": tensor, "y": tensor}
-            images = batch["image"]
-            cond = {}
-            if "y" in batch:
-                cond["y"] = batch["y"]
-            yield images, cond
+        while True:
+            for batch in loader:
+                images = batch["image"]
+                cond = {}
+                if "y" in batch:
+                    cond["y"] = batch["y"]
+                yield images, cond
 
-    data = iter(data_iterator())
+    data = data_iterator()
 
     logger.log("training...")
     TrainLoop(
