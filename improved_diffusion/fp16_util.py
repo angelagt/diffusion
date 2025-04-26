@@ -38,14 +38,18 @@ def make_master_params(model_params):
 
 
 def model_grads_to_master_grads(model_params, master_params):
-    """
-    Copy the gradients from the model parameters into the master parameters
-    from make_master_params().
-    """
-    master_params[0].grad = _flatten_dense_tensors(
-        [param.grad.data.detach().float() for param in model_params]
-    )
+    # Build a list of gradient tensors (use zeros for params with no grad)
+    grad_tensors = []
+    for param in model_params:
+        if param.grad is None:
+            # no gradient → zero tensor matching this param
+            grad_tensors.append(param.data.new_zeros(param.data.shape).float())
+        else:
+            # detach and convert to float32
+            grad_tensors.append(param.grad.data.detach().float())
 
+    # Flatten and assign to the single master_param
+    master_params[0].grad = _flatten_dense_tensors(grad_tensors)
 
 def master_params_to_model_params(model_params, master_params):
     """
