@@ -229,17 +229,18 @@ class TrainLoop:
         # detect NaNs/infs, skipping parameters with no grad
         bad_grad = False
         for p in self.model_params:
+            # skip parameters without gradients
             if p.grad is None:
                 continue
+            # if any grad has NaN or Inf, bail
             if not th.isfinite(p.grad).all():
                 bad_grad = True
                 break
         if bad_grad:
             self.skipped_steps += 1
-            return
-        if any(not th.isfinite(p.grad).all() for p in self.model_params):
-            self.lg_loss_scale -= 1
-            logger.log(f"Found NaN, decreased lg_loss_scale to {self.lg_loss_scale}")
+            # Optionally shrink loss scale if desired:
+            self.lg_loss_scale = max(self.lg_loss_scale - 1, 1)
+            logger.log(f"Found bad grad, decreased lg_loss_scale to {self.lg_loss_scale}")
             return
 
         model_grads_to_master_grads(self.model_params, self.master_params)
