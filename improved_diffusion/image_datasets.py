@@ -131,6 +131,6 @@ def load_data(
         batch_size=batch_size,
         shuffle=not deterministic,
         drop_last=True,
-        num_workers=4,
+        num_workers=2,
     )
     return loader
