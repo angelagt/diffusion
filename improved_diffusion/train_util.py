@@ -179,8 +179,10 @@ class TrainLoop:
             pbar.update(1)
             # if we've logged a loss this step, show it
             # (logger._kv_histories is where logkv_mean() stores values)
-            if "loss" in logger._kv_histories:
-                last_loss = logger._kv_histories["loss"][-1]
+            # Use the public API to get current iteration’s kvs
+            kvs = logger.getkvs()
+            if "loss" in kvs:
+                last_loss = kvs["loss"]
                 pbar.set_postfix(loss=f"{last_loss:.4f}")
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
