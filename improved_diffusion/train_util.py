@@ -1,4 +1,5 @@
 import copy
+from tqdm.auto import tqdm
 import functools
 import os
 
@@ -159,21 +160,40 @@ class TrainLoop:
         self.model.convert_to_fp16()
 
     def run_loop(self):
+        # set up a progress bar over steps (or leave open if no lr_anneal_steps)
+        total_steps = (
+            None
+            if not self.lr_anneal_steps
+            else self.lr_anneal_steps - self.resume_step
+        )
+        pbar = tqdm(total=total_steps, desc="training", unit="step")
+
         while (
-            not self.lr_anneal_steps
-            or self.step + self.resume_step < self.lr_anneal_steps
+             not self.lr_anneal_steps
+             or self.step + self.resume_step < self.lr_anneal_steps
         ):
+            # fetch a batch and run one training step
             batch, cond = next(self.data)
             self.run_step(batch, cond)
-            if self.step % self.log_interval == 0:
-                logger.dumpkvs()
-            if self.step % self.save_interval == 0:
-                self.save()
-                # Run for a finite amount of time in integration tests.
-                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-                    return
+            # advance the bar
+            pbar.update(1)
+            # if we've logged a loss this step, show it
+            # (logger._kv_histories is where logkv_mean() stores values)
+            if "loss" in logger._kv_histories:
+                last_loss = logger._kv_histories["loss"][-1]
+                pbar.set_postfix(loss=f"{last_loss:.4f}")
+             if self.step % self.log_interval == 0:
+                 logger.dumpkvs()
+             if self.step % self.save_interval == 0:
+                 self.save()
+            # optional early exit for tests
+            if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
+                pbar.close()
+                return
             self.step += 1
-        # Save the last checkpoint if it wasn't already saved.
+        # close bar when finishing
+        pbar.close()
+        # final save if needed
         if (self.step - 1) % self.save_interval != 0:
             self.save()
 
