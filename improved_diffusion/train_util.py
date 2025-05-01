@@ -182,10 +182,10 @@ class TrainLoop:
             if "loss" in logger._kv_histories:
                 last_loss = logger._kv_histories["loss"][-1]
                 pbar.set_postfix(loss=f"{last_loss:.4f}")
-             if self.step % self.log_interval == 0:
-                 logger.dumpkvs()
-             if self.step % self.save_interval == 0:
-                 self.save()
+            if self.step % self.log_interval == 0:
+                logger.dumpkvs()
+            if self.step % self.save_interval == 0:
+                self.save()
             # optional early exit for tests
             if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                 pbar.close()
